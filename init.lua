@@ -102,7 +102,7 @@ vim.g.have_nerd_font = true
 vim.o.number = true
 -- You can also add relative line numbers, to help with jumping.
 --  Experiment for yourself to see if you like it!
--- vim.o.relativenumber = true
+vim.o.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.o.mouse = 'a'
@@ -325,6 +325,15 @@ require('lazy').setup({
   -- Then, because we use the `opts` key (recommended), the configuration runs
   -- after the plugin has been loaded as `require(MODULE).setup(opts)`.
 
+  --{
+  -- 'iamcco/markdown-preview.nvim',
+  --cmd = { 'MarkdownPreviewToggle', 'MarkdownPreview', 'MarkdownPreviewStop' },
+  --build = 'cd app && npm i -g',
+  --init = function()
+  --  vim.g.mkdp_filetypes = { 'markdown' }
+  --end,
+  --ft = { 'markdown' },
+  --},
   { -- Useful plugin to show you pending keybinds.
     'folke/which-key.nvim',
     event = 'VimEnter', -- Sets the loading event to 'VimEnter'
@@ -374,6 +383,7 @@ require('lazy').setup({
         { '<leader>s', group = '[S]earch' },
         { '<leader>t', group = '[T]oggle' },
         { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } },
+        { '<leader>c', group = '[C]ode Actions (JDT)' },
       },
     },
   },
@@ -754,8 +764,8 @@ require('lazy').setup({
           },
         },
 
-        -- Kotlin language server
-        kotlin_language_server = {},
+        -- NOTE: Kotlin LSP is configured manually after mason-lspconfig setup
+        -- See the manual setup below (after mason-lspconfig handlers)
       }
 
       -- Ensure the servers and tools above are installed
@@ -775,7 +785,8 @@ require('lazy').setup({
       vim.list_extend(ensure_installed, {
         'stylua', -- Used to format Lua code
         'typescript-language-server', -- TypeScript/JavaScript LSP
-        'kotlin-language-server', -- Kotlin LSP
+        -- NOTE: kotlin-lsp is installed via brew, not mason
+        'jdtls', -- Eclipse JDT.LS for better Gradle composite build support
         'prettier', -- TypeScript/JavaScript formatter
         'ktlint', -- Kotlin formatter
         'eslint_d', -- JavaScript/TypeScript linter
@@ -787,6 +798,11 @@ require('lazy').setup({
         automatic_installation = false,
         handlers = {
           function(server_name)
+            -- Skip kotlin_language_server - it's managed manually via Homebrew
+            if server_name == 'kotlin_language_server' then
+              return
+            end
+
             local server = servers[server_name] or {}
             -- This handles overriding only values explicitly passed
             -- by the server configuration above. Useful when disabling
@@ -794,6 +810,67 @@ require('lazy').setup({
             server.capabilities = vim.tbl_deep_extend('force', {}, capabilities, server.capabilities or {})
             require('lspconfig')[server_name].setup(server)
           end,
+        },
+      }
+
+      -- Manually setup fwcd/kotlin-language-server (installed via brew, not mason)
+      -- This LSP has excellent Gradle support and works well with composite builds
+      require('lspconfig').kotlin_language_server.setup {
+        cmd = { '/opt/homebrew/bin/kotlin-language-server' }, -- Explicit path to avoid Mason version
+        root_dir = function(fname)
+          local util = require 'lspconfig.util'
+          -- For composite builds, always use the root settings.gradle.kts
+          -- This ensures all included builds are visible to the LSP
+          local git_root = util.root_pattern '.git'(fname)
+
+          if git_root then
+            return git_root
+          end
+
+          -- Fallback to nearest settings.gradle.kts
+          return util.root_pattern('settings.gradle.kts', 'settings.gradle', 'build.gradle.kts', 'build.gradle')(fname)
+        end,
+        filetypes = { 'kotlin' },
+        capabilities = capabilities,
+        settings = {
+          kotlin = {
+            -- Increase timeout for large projects (composite builds)
+            indexing = {
+              enabled = true,
+            },
+            -- Enable all diagnostics
+            compiler = {
+              jvm = {
+                target = '21',
+              },
+            },
+            -- Increase memory for large projects
+            languageServer = {
+              maxMemory = 4096,
+            },
+          },
+        },
+        on_attach = function(client, bufnr)
+          -- Only show notification once on first attach
+          if not vim.g.kotlin_lsp_attached then
+            vim.notify('Kotlin LSP attached. Gradle sync may take 2-3 minutes for composite builds...', vim.log.levels.INFO)
+            vim.g.kotlin_lsp_attached = true
+          end
+
+          -- Add command to manually refresh Gradle dependencies
+          vim.api.nvim_buf_create_user_command(bufnr, 'KotlinRefreshGradle', function()
+            vim.notify('Refreshing Kotlin LSP Gradle dependencies...', vim.log.levels.INFO)
+            vim.lsp.buf.execute_command { command = 'kotlin.languageServer.refreshGradleDependencies' }
+          end, { desc = 'Refresh Kotlin LSP Gradle dependencies' })
+
+          -- Add keymap for diagnostics
+          local map = function(keys, func, desc)
+            vim.keymap.set('n', keys, func, { buffer = bufnr, desc = 'Kotlin LSP: ' .. desc })
+          end
+          map('<leader>kr', '<cmd>KotlinRefreshGradle<cr>', '[K]otlin [R]efresh Gradle')
+        end,
+        init_options = {
+          storagePath = vim.fn.stdpath 'cache' .. '/kotlin-language-server',
         },
       }
     end,
@@ -944,6 +1021,21 @@ require('lazy').setup({
     },
   },
 
+  -- Org Mode --
+  {
+    'nvim-orgmode/orgmode',
+    event = 'VeryLazy',
+    config = function()
+      -- Setup orgmode
+      require('orgmode').setup {
+        org_agenda_files = '~/orgfiles/**/*',
+        org_default_notes_file = '~/orgfiles/refile.org',
+      }
+      -- Experimental LSP support
+      vim.lsp.enable 'org'
+    end,
+  },
+
   { -- You can easily change to a different colorscheme.
     -- Change the name of the colorscheme plugin below, and then
     -- change the command in the config to whatever the name of that colorscheme is.
@@ -1012,7 +1104,23 @@ require('lazy').setup({
     main = 'nvim-treesitter.configs', -- Sets main module to use for opts
     -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
     opts = {
-      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc', 'javascript', 'typescript', 'tsx', 'kotlin' },
+      ensure_installed = {
+        'bash',
+        'c',
+        'diff',
+        'html',
+        'lua',
+        'luadoc',
+        'markdown',
+        'markdown_inline',
+        'query',
+        'vim',
+        'vimdoc',
+        'javascript',
+        'typescript',
+        'tsx',
+        'kotlin',
+      },
       -- Autoinstall languages that are not installed
       auto_install = true,
       highlight = {
