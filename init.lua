@@ -1021,6 +1021,25 @@ require('lazy').setup({
     },
   },
 
+  -- Gradle plugin (DISABLED - doesn't support composite builds)
+  -- Using gradle-composite instead (see line 1210)
+
+  {
+    'oclay1st/gradle.nvim',
+    enabled = false,  -- Disabled due to lack of composite build support
+    cmd = { 'Gradle', 'GradleExec', 'GradleInit', 'GradleFavorites' },
+    dependencies = {
+      'nvim-lua/plenary.nvim',
+      'MunifTanjim/nui.nvim',
+    },
+    opts = {}, -- options, see default configuration
+    keys = {
+      { '<leader>G', desc = '+Gradle', mode = { 'n', 'v' } },
+      { '<leader>Gg', '<cmd>Gradle<cr>', desc = 'Gradle Projects' },
+      { '<leader>Gf', '<cmd>GradleFavorites<cr>', desc = 'Gradle Favorite Commands' },
+    },
+  },
+
   -- Org Mode --
   {
     'nvim-orgmode/orgmode',
@@ -1187,6 +1206,24 @@ require('lazy').setup({
     },
   },
 })
+
+-- Gradle Composite Build Integration (replaces gradle.nvim)
+require('gradle-composite').setup({
+  keymap_opts = {
+    prefix = "<leader>g"  -- Using lowercase 'g' to avoid conflicts
+  },
+  terminal = {
+    direction = "horizontal",
+    size = 15,
+    close_on_exit = false,
+  },
+})
+
+-- Additional keybindings to match old gradle.nvim keys (<leader>G)
+local gradle = require('gradle-composite')
+vim.keymap.set('n', '<leader>Gg', gradle.telescope_modules, { desc = 'Gradle: Select Module & Task' })
+vim.keymap.set('n', '<leader>Gf', gradle.telescope_tasks, { desc = 'Gradle: Find Tasks (current module)' })
+vim.keymap.set('n', '<leader>GG', gradle.telescope_global_tasks, { desc = 'Gradle: Global Tasks' })
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
